@@ -1,0 +1,26 @@
+import http from "./http";
+
+// ✅ Ajusta aquí según tu backend:
+// Opción A: /residentes
+// Opción B: /personas?tipo=residente
+const PATH = "/residentes";
+
+export async function listResidentes() {
+  const { data } = await http.get(PATH);
+  return data;
+}
+
+export async function createResidente(payload) {
+  const { data } = await http.post(PATH, payload);
+  return data;
+}
+
+export async function updateResidente(id, payload) {
+  const { data } = await http.put(`${PATH}/${id}`, payload);
+  return data;
+}
+
+export async function deleteResidente(id) {
+  const { data } = await http.delete(`${PATH}/${id}`);
+  return data;
+}
