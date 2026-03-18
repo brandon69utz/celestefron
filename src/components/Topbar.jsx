@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext.jsx";
+import NotificationBell from "./NotificationBell.jsx";
 
 export default function Topbar() {
   const nav = useNavigate();
@@ -32,9 +33,8 @@ export default function Topbar() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button className="rounded px-2 py-1 text-xs hover:bg-white/10">
-            🔔
-          </button>
+          <NotificationBell />
+
           <button className="rounded px-2 py-1 text-xs hover:bg-white/10">
             ⚙️
           </button>

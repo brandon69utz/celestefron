@@ -5,6 +5,9 @@ import Input from "../components/ui/Input.jsx";
 import Badge from "../components/ui/Badge.jsx";
 import Modal from "../components/ui/Modal.jsx";
 import Table from "../components/ui/Table.jsx";
+import ActionAlert from "../components/ui/ActionAlert.jsx";
+import LoadingButton from "../components/ui/LoadingButton.jsx";
+import useAsyncAction from "../hooks/useAsyncAction.js";
 
 import {
   getResidentes,
@@ -19,9 +22,8 @@ export default function Residentes() {
   const [q, setQ] = useState("");
 
   const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-
   const [editing, setEditing] = useState(null);
+
   const [form, setForm] = useState({
     nombre: "",
     apellido_p: "",
@@ -31,6 +33,13 @@ export default function Residentes() {
     departamento_id: "",
     password: "",
   });
+
+  const {
+    loading: actionLoading,
+    alert,
+    runAction,
+    closeAlert,
+  } = useAsyncAction();
 
   async function load() {
     setLoading(true);
@@ -56,7 +65,10 @@ export default function Residentes() {
 
     return rows.filter((r) => {
       const p = r.persona ?? r;
-      const full = `${p.nombre ?? ""} ${p.apellido_p ?? ""} ${p.apellido_m ?? ""} ${p.email ?? ""} ${p.celular ?? ""}`.toLowerCase();
+      const dep = r.departamento ?? null;
+      const full =
+        `${p.nombre ?? ""} ${p.apellido_p ?? ""} ${p.apellido_m ?? ""} ${p.email ?? ""} ${p.celular ?? ""} ${dep?.numero ?? ""}`.toLowerCase();
+
       return full.includes(s);
     });
   }, [rows, q]);
@@ -77,8 +89,8 @@ export default function Residentes() {
 
   function openEdit(row) {
     const p = row.persona ?? row;
-    setEditing(row);
 
+    setEditing(row);
     setForm({
       nombre: p.nombre ?? "",
       apellido_p: p.apellido_p ?? "",
@@ -86,7 +98,7 @@ export default function Residentes() {
       email: p.email ?? "",
       celular: p.celular ?? "",
       departamento_id: row.departamento_id ?? row?.departamento?.id ?? "",
-      password: "", // no se muestra/guarda al editar
+      password: "",
     });
 
     setOpen(true);
@@ -94,7 +106,6 @@ export default function Residentes() {
 
   async function onSave(e) {
     e.preventDefault();
-    setSaving(true);
 
     try {
       const basePayload = {
@@ -103,31 +114,41 @@ export default function Residentes() {
         apellido_m: form.apellido_m || null,
         email: form.email,
         celular: form.celular,
-        departamento_id: form.departamento_id ? Number(form.departamento_id) : null,
+        departamento_id: form.departamento_id
+          ? Number(form.departamento_id)
+          : null,
       };
 
-      if (editing?.id) {
-        await updateResidente(editing.id, basePayload);
-      } else {
-        const payload = {
-          ...basePayload,
-          password: form.password, // ✅ requerido para crear el usuario del residente
-        };
-        await createResidente(payload);
-      }
+      await runAction({
+        action: async () => {
+          if (editing?.id) {
+            return await updateResidente(editing.id, basePayload);
+          }
+
+          return await createResidente({
+            ...basePayload,
+            password: form.password,
+          });
+        },
+        successTitle: editing ? "Residente actualizado" : "Residente creado",
+        successMessage: editing
+          ? "Los datos del residente se actualizaron correctamente."
+          : "El residente se registró correctamente.",
+        errorTitle: "No se pudo guardar",
+        getErrorMessage: (err) => {
+          const data = err?.response?.data;
+          if (data?.errors?.email?.[0]) return data.errors.email[0];
+          if (data?.errors?.departamento_id?.[0])
+            return data.errors.departamento_id[0];
+          if (data?.errors?.password?.[0]) return data.errors.password[0];
+          return data?.message || "Revisa los datos enviados.";
+        },
+      });
 
       setOpen(false);
       await load();
     } catch (err) {
       console.error(err);
-      const data = err?.response?.data;
-      if (data) {
-        alert(JSON.stringify(data, null, 2));
-      } else {
-        alert("No se pudo guardar. Revisa datos o backend.");
-      }
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -139,11 +160,18 @@ export default function Residentes() {
     if (!ok) return;
 
     try {
-      await deleteResidente(row.id);
+      await runAction({
+        action: () => deleteResidente(row.id),
+        successTitle: "Residente eliminado",
+        successMessage: "El residente se eliminó correctamente.",
+        errorTitle: "No se pudo eliminar",
+        getErrorMessage: (err) =>
+          err?.response?.data?.message || "Ocurrió un error al eliminar.",
+      });
+
       await load();
     } catch (err) {
       console.error(err);
-      alert("No se pudo eliminar.");
     }
   }
 
@@ -154,6 +182,7 @@ export default function Residentes() {
       render: (r) => {
         const p = r.persona ?? r;
         const name = `${p.nombre ?? ""} ${p.apellido_p ?? ""} ${p.apellido_m ?? ""}`.trim();
+
         return (
           <div className="min-w-[220px]">
             <div className="font-semibold text-slate-900">{name || "—"}</div>
@@ -165,7 +194,7 @@ export default function Residentes() {
     {
       key: "celular",
       label: "Celular",
-      render: (r) => (r.persona?.celular ?? r.celular ?? "—"),
+      render: (r) => r.persona?.celular ?? r.celular ?? "—",
     },
     {
       key: "departamento",
@@ -203,7 +232,7 @@ export default function Residentes() {
 
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <Input
-              placeholder="Buscar por nombre, correo o celular..."
+              placeholder="Buscar por nombre, correo, celular o departamento..."
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -213,7 +242,7 @@ export default function Residentes() {
 
         <div className="px-4 py-3">
           <p className="text-sm text-slate-600">
-            Aquí puedes gestionar a los residentes. (Alta, edición y eliminación)
+            Gestiona altas, edición y eliminación de residentes.
           </p>
         </div>
       </div>
@@ -243,23 +272,31 @@ export default function Residentes() {
               onChange={(e) => setForm({ ...form, nombre: e.target.value })}
               required
             />
+
             <Input
               label="Apellido paterno"
               value={form.apellido_p}
-              onChange={(e) => setForm({ ...form, apellido_p: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, apellido_p: e.target.value })
+              }
               required
             />
+
             <Input
               label="Apellido materno"
               value={form.apellido_m}
-              onChange={(e) => setForm({ ...form, apellido_m: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, apellido_m: e.target.value })
+              }
             />
+
             <Input
               label="Celular"
               value={form.celular}
               onChange={(e) => setForm({ ...form, celular: e.target.value })}
               required
             />
+
             <Input
               label="Correo"
               type="email"
@@ -267,8 +304,9 @@ export default function Residentes() {
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               required
             />
+
             <Input
-              label="Departamento ID (opcional)"
+              label="Departamento ID"
               value={form.departamento_id}
               onChange={(e) =>
                 setForm({ ...form, departamento_id: e.target.value })
@@ -283,7 +321,7 @@ export default function Residentes() {
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 required
-                placeholder="Mínimo 8 caracteres"
+                placeholder="Mínimo 6 caracteres"
               />
             )}
           </div>
@@ -293,16 +331,29 @@ export default function Residentes() {
               type="button"
               variant="secondary"
               onClick={() => setOpen(false)}
-              disabled={saving}
+              disabled={actionLoading}
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? "Guardando..." : "Guardar"}
-            </Button>
+
+            <LoadingButton
+              type="submit"
+              loading={actionLoading}
+              className="bg-slate-900 text-white hover:bg-slate-800"
+            >
+              Guardar
+            </LoadingButton>
           </div>
         </form>
       </Modal>
+
+      <ActionAlert
+        open={alert.open}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+        onClose={closeAlert}
+      />
     </div>
   );
 }

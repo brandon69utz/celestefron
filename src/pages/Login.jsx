@@ -1,37 +1,47 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext.jsx";
+import ActionAlert from "../components/ui/ActionAlert.jsx";
+import LoadingButton from "../components/ui/LoadingButton.jsx";
+import useAsyncAction from "../hooks/useAsyncAction.js";
 
 export default function Login() {
   const { login } = useAuth();
   const [email, setEmail] = useState("admin@condominio.com");
   const [password, setPassword] = useState("admin123");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+
+  const { loading, alert, runAction, closeAlert } = useAsyncAction();
 
   const submit = async (e) => {
     e.preventDefault();
-    setError("");
-    setLoading(true);
 
     try {
-      await login(email, password);
-      // redirige desde AuthContext
+      await runAction({
+        action: () => login(email, password),
+        successTitle: "Sesión iniciada",
+        successMessage: "Bienvenido al sistema.",
+        errorTitle: "No se pudo iniciar sesión",
+        getErrorMessage: (err) => {
+          const status = err?.response?.status;
+          const msg = err?.response?.data?.message;
+
+          console.log("LOGIN ERROR:", err?.response?.data || err);
+
+          if (status === 401 || status === 422) {
+            return "Credenciales incorrectas.";
+          }
+
+          return msg ? `Error: ${msg}` : "No se pudo iniciar sesión.";
+        },
+      });
     } catch (err) {
-      const status = err?.response?.status;
-      const msg = err?.response?.data?.message;
-
-      console.log("LOGIN ERROR:", err?.response?.data || err);
-
-      if (status === 401) setError("Credenciales incorrectas.");
-      else setError(msg ? `Error: ${msg}` : "No se pudo iniciar sesión.");
-    } finally {
-      setLoading(false);
+      console.error(err);
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/20 p-6">
+      <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/20 p-6 shadow-xl">
         <h1 className="text-xl font-semibold">Iniciar sesión</h1>
         <p className="text-sm text-slate-400 mt-1">
           Ingresa con tu correo y contraseña.
@@ -45,6 +55,8 @@ export default function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               type="email"
+              placeholder="correo@condominio.com"
+              autoComplete="email"
             />
           </div>
 
@@ -55,23 +67,37 @@ export default function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               type="password"
+              placeholder="********"
+              autoComplete="current-password"
             />
           </div>
 
-          {error && (
-            <div className="rounded-xl border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-200">
-              {error}
-            </div>
-          )}
+          <div className="text-right">
+            <Link
+              to="/forgot-password"
+              className="text-sm text-slate-400 underline hover:text-white"
+            >
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </div>
 
-          <button
-            disabled={loading}
-            className="w-full rounded-xl bg-white/10 hover:bg-white/15 border border-slate-700 px-4 py-2 font-semibold disabled:opacity-60"
+          <LoadingButton
+            type="submit"
+            loading={loading}
+            className="w-full rounded-xl bg-white/10 hover:bg-white/15 border border-slate-700 text-white"
           >
-            {loading ? "Entrando..." : "Entrar"}
-          </button>
+            Entrar
+          </LoadingButton>
         </form>
       </div>
+
+      <ActionAlert
+        open={alert.open}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+        onClose={closeAlert}
+      />
     </div>
   );
 }

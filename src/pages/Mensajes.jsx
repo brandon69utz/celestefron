@@ -4,8 +4,7 @@ import Button from "../components/ui/Button.jsx";
 import Input from "../components/ui/Input.jsx";
 import Badge from "../components/ui/Badge.jsx";
 import { useAuth } from "../auth/AuthContext.jsx";
-
-import { getMensajes, createMensaje, marcarLeido } from "../api/mensajes.js";
+import socket from "../socket";
 
 export default function Mensajes() {
   const { me } = useAuth();
@@ -16,29 +15,82 @@ export default function Mensajes() {
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState(null);
 
-  // composer
-  const [toDep, setToDep] = useState(""); // para admin (ej: "A-101")
+  const [toDep, setToDep] = useState("");
   const [text, setText] = useState("");
 
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await safeGetMensajes();
-      const normalized = (Array.isArray(data) ? data : []).map(normalizeMsg);
-      normalized.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-      setItems(normalized);
+  const userName = me?.persona
+    ? `${me.persona.nombre ?? ""} ${me.persona.apellido_p ?? ""}`.trim()
+    : "Usuario";
 
-      // seleccionar primero si no hay
-      if (!selectedId && normalized.length > 0) setSelectedId(normalized[0].id);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const departamentoLabel =
+    me?.departamento?.numero ||
+    me?.departamento?.nombre ||
+    "";
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!me) return;
+
+    setLoading(true);
+
+    socket.emit("unirse_chat", {
+      userId: me.id,
+      admin,
+      userName,
+      departamentoLabel: admin ? "" : String(departamentoLabel || ""),
+    });
+
+    const handleHistory = (history) => {
+      const normalized = (Array.isArray(history) ? history : [])
+        .map((m) => normalizeMsg(m, me))
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      setItems(normalized);
+      setSelectedId((prev) => prev ?? (normalized[0]?.id ?? null));
+      setLoading(false);
+    };
+
+    const handleNewMessage = (raw) => {
+      const msg = normalizeMsg(raw, me);
+
+      if (!admin) {
+        const dep = String(departamentoLabel || "").trim().toLowerCase();
+        const from = String(msg.from_label || "").trim().toLowerCase();
+        const to = String(msg.to_label || "").trim().toLowerCase();
+
+        const esParaMiDepartamento =
+          raw?.sender_admin === true ||
+          (dep && from === dep) ||
+          (dep && to === dep) ||
+          raw?.sender_user_id === me?.id;
+
+        if (!esParaMiDepartamento) return;
+      }
+
+      setItems((prev) => {
+        const next = [msg, ...prev.filter((x) => x.id !== msg.id)];
+        next.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        return next;
+      });
+
+      setSelectedId((prev) => prev ?? msg.id);
+    };
+
+    const handleChatError = (err) => {
+      console.error("CHAT ERROR:", err);
+      alert(err?.message || "No se pudo procesar el mensaje.");
+      setLoading(false);
+    };
+
+    socket.on("chat_historial", handleHistory);
+    socket.on("nuevo_mensaje", handleNewMessage);
+    socket.on("chat_error", handleChatError);
+
+    return () => {
+      socket.off("chat_historial", handleHistory);
+      socket.off("nuevo_mensaje", handleNewMessage);
+      socket.off("chat_error", handleChatError);
+    };
+  }, [me, admin, userName, departamentoLabel]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -60,54 +112,42 @@ export default function Mensajes() {
     [items]
   );
 
-  async function onSelect(m) {
+  function onSelect(m) {
     setSelectedId(m.id);
     if (!m.read) {
-      // marcar leído (optimista)
-      setItems((prev) => prev.map((x) => (x.id === m.id ? { ...x, read: true } : x)));
-      try {
-        await safeMarcarLeido(m.id);
-      } catch (e) {
-        // si falla, no pasa nada, ya lo dejamos leído en UI
-      }
+      setItems((prev) =>
+        prev.map((x) => (x.id === m.id ? { ...x, read: true } : x))
+      );
     }
   }
 
-  async function send(e) {
+  function send(e) {
     e.preventDefault();
     if (!text.trim()) return;
 
     setLoading(true);
-    try {
-      const payload = {
-        subject: admin ? `Mensaje a ${toDep || "Departamento"}` : "Mensaje",
-        body: text.trim(),
-        // en backend real: manda depto destino o id
-        to_label: admin ? (toDep || "Departamento") : "Administración",
-      };
 
-      const created = await safeCreateMensaje(payload, me);
-      const msg = normalizeMsg(created);
+    socket.emit("enviar_mensaje", {
+      subject: admin ? `Mensaje a ${toDep || "Departamento"}` : "Mensaje",
+      body: text.trim(),
+      to_label: admin ? (toDep || "Departamento") : "Administración",
+    });
 
-      setItems((prev) => [msg, ...prev]);
-      setSelectedId(msg.id);
-      setText("");
-      setToDep("");
-    } catch (err) {
-      console.error(err);
-      alert("No se pudo enviar. Revisa consola/backend.");
-    } finally {
-      setLoading(false);
-    }
+    setText("");
+    setToDep("");
+    setLoading(false);
   }
 
   return (
     <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-      {/* LEFT: Inbox */}
       <Card
         title="Mensajes"
         subtitle="Bandeja de entrada"
-        right={<Badge tone={unreadCount ? "amber" : "slate"}>{unreadCount} sin leer</Badge>}
+        right={
+          <Badge tone={unreadCount ? "amber" : "slate"}>
+            {unreadCount} sin leer
+          </Badge>
+        }
       >
         <div className="space-y-3">
           <Input
@@ -116,9 +156,9 @@ export default function Mensajes() {
             placeholder="Buscar mensajes..."
           />
 
-          <div className="space-y-2 max-h-[62vh] overflow-y-auto pr-1">
+          <div className="max-h-[62vh] space-y-2 overflow-y-auto pr-1">
             {filtered.length === 0 ? (
-              <div className="text-sm text-slate-400 py-6 text-center">
+              <div className="py-6 text-center text-sm text-slate-500">
                 {loading ? "Cargando..." : "No hay mensajes"}
               </div>
             ) : (
@@ -127,30 +167,32 @@ export default function Mensajes() {
                   key={m.id}
                   onClick={() => onSelect(m)}
                   className={[
-                    "w-full text-left rounded-2xl border p-3 transition",
+                    "w-full rounded-2xl border p-3 text-left transition",
                     m.id === selectedId
-                      ? "border-slate-700 bg-white/5"
-                      : "border-slate-800 bg-slate-900/20 hover:bg-white/5",
+                      ? "border-blue-300 bg-blue-50 shadow-sm"
+                      : "border-slate-200 bg-white hover:bg-slate-50",
                   ].join(" ")}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-white truncate">
+                        <span className="truncate font-semibold text-slate-900">
                           {m.subject}
                         </span>
-                        {!m.read && <span className="h-2 w-2 rounded-full bg-amber-400" />}
+                        {!m.read && (
+                          <span className="h-2 w-2 rounded-full bg-amber-400" />
+                        )}
                       </div>
-                      <div className="text-xs text-slate-400 truncate mt-1">
+                      <div className="mt-1 truncate text-xs text-slate-500">
                         {m.from_label} → {m.to_label}
                       </div>
                     </div>
-                    <div className="text-xs text-slate-500 whitespace-nowrap">
+                    <div className="whitespace-nowrap text-xs text-slate-400">
                       {formatDate(m.created_at)}
                     </div>
                   </div>
 
-                  <div className="text-sm text-slate-300 truncate mt-2">
+                  <div className="mt-2 truncate text-sm text-slate-700">
                     {m.body}
                   </div>
                 </button>
@@ -160,7 +202,6 @@ export default function Mensajes() {
         </div>
       </Card>
 
-      {/* RIGHT: Conversation */}
       <div className="space-y-4">
         <Card
           title={selected ? selected.subject : "Selecciona un mensaje"}
@@ -178,22 +219,25 @@ export default function Mensajes() {
               <div className="text-xs text-slate-500">
                 {formatDateLong(selected.created_at)}
               </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-4 text-slate-100">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800">
                 <p className="whitespace-pre-wrap leading-relaxed">
                   {selected.body}
                 </p>
               </div>
             </div>
           ) : (
-            <div className="text-sm text-slate-400 py-6">
+            <div className="py-6 text-sm text-slate-500">
               Elige un mensaje del lado izquierdo.
             </div>
           )}
         </Card>
 
-        {/* Composer */}
         <Card
-          title={admin ? "Enviar mensaje a un departamento" : "Enviar mensaje a administración"}
+          title={
+            admin
+              ? "Enviar mensaje a un departamento"
+              : "Enviar mensaje a administración"
+          }
           subtitle="Escribe un mensaje y envíalo"
         >
           <form onSubmit={send} className="space-y-3">
@@ -210,7 +254,7 @@ export default function Mensajes() {
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Escribe tu mensaje..."
-              className="w-full min-h-[120px] rounded-2xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-100 outline-none focus:border-slate-600"
+              className="min-h-[120px] w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm text-slate-800 outline-none focus:border-blue-400"
             />
 
             <div className="flex justify-end gap-2">
@@ -228,33 +272,20 @@ export default function Mensajes() {
   );
 }
 
-/* =========================
-   Normalización + Utils
-   ========================= */
-
-function normalizeMsg(raw) {
-  // soporta backend o fallback
+function normalizeMsg(raw, me) {
   const id = raw?.id ?? raw?.message_id ?? Date.now();
   const subject = raw?.subject ?? "Mensaje";
   const body = raw?.body ?? raw?.mensaje ?? "";
-  const read = raw?.read ?? raw?.leido ?? false;
-
-  const created_at =
-    raw?.created_at ??
-    raw?.fecha ??
-    new Date().toISOString();
+  const created_at = raw?.created_at ?? raw?.fecha ?? new Date().toISOString();
 
   const from_label =
-    raw?.from_label ??
-    raw?.from ??
-    raw?.emisor ??
-    "Usuario";
+    raw?.from_label ?? raw?.from ?? raw?.emisor ?? "Usuario";
 
   const to_label =
-    raw?.to_label ??
-    raw?.to ??
-    raw?.destino ??
-    "Administración";
+    raw?.to_label ?? raw?.to ?? raw?.destino ?? "Administración";
+
+  const isMine = raw?.sender_user_id === me?.id;
+  const read = isMine ? true : raw?.read ?? raw?.leido ?? false;
 
   return { id, subject, body, read, created_at, from_label, to_label };
 }
@@ -275,81 +306,4 @@ function formatDateLong(iso) {
   } catch {
     return iso || "";
   }
-}
-
-/* =========================
-   Fallbacks (si backend no está)
-   ========================= */
-
-async function safeGetMensajes() {
-  try {
-    return await getMensajes();
-  } catch (e) {
-    const raw = localStorage.getItem("mensajes");
-    return raw ? JSON.parse(raw) : demoMensajes();
-  }
-}
-
-async function safeCreateMensaje(payload, me) {
-  try {
-    return await createMensaje(payload);
-  } catch (e) {
-    const raw = localStorage.getItem("mensajes");
-    const arr = raw ? JSON.parse(raw) : demoMensajes();
-
-    const persona = me?.persona;
-    const from = persona
-      ? `${persona.nombre ?? ""} ${persona.apellido_p ?? ""}`.trim()
-      : "Usuario";
-
-    const msg = {
-      id: Date.now(),
-      subject: payload.subject || "Mensaje",
-      body: payload.body || "",
-      read: true, // el que envía lo ve leído
-      created_at: new Date().toISOString(),
-      from_label: from,
-      to_label: payload.to_label || "Administración",
-    };
-
-    arr.unshift(msg);
-    localStorage.setItem("mensajes", JSON.stringify(arr));
-    return msg;
-  }
-}
-
-async function safeMarcarLeido(id) {
-  try {
-    return await marcarLeido(id);
-  } catch (e) {
-    const raw = localStorage.getItem("mensajes");
-    const arr = raw ? JSON.parse(raw) : [];
-    const idx = arr.findIndex((x) => (x.id ?? x.message_id) === id);
-    if (idx >= 0) arr[idx].read = true;
-    localStorage.setItem("mensajes", JSON.stringify(arr));
-    return true;
-  }
-}
-
-function demoMensajes() {
-  return [
-    {
-      id: 1001,
-      subject: "Aviso: Mantenimiento de elevador",
-      body: "El jueves habrá mantenimiento del elevador de 10:00 a 13:00.",
-      read: false,
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-      from_label: "Administración",
-      to_label: "Todos",
-    },
-    {
-      id: 1002,
-      subject: "Pago de mantenimiento",
-      body: "Recuerda que la cuota vence el día 5 de cada mes.",
-      read: true,
-      created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
-      from_label: "Administración",
-      to_label: "Residentes",
-    },
-  ];
 }

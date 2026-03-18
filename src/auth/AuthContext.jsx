@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import http from "../api/http"; // tu axios configurado
+import http from "../api/http";
 import { useNavigate } from "react-router-dom";
 
 const AuthContext = createContext(null);
@@ -7,13 +7,12 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const navigate = useNavigate();
   const [me, setMe] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingMe, setLoadingMe] = useState(true);
 
-  // Cargar usuario al iniciar
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
-      setLoading(false);
+      setLoadingMe(false);
       return;
     }
 
@@ -26,7 +25,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem("token");
         setMe(null);
       })
-      .finally(() => setLoading(false));
+      .finally(() => setLoadingMe(false));
   }, []);
 
   const login = async (email, password) => {
@@ -38,14 +37,13 @@ export function AuthProvider({ children }) {
 
     localStorage.setItem("token", res.data.token);
     setMe(res.data.user);
-    navigate("/app/dashboard", { replace: true });
+    navigate("/app", { replace: true });
   };
 
   const logout = async () => {
     try {
       await http.post("/auth/logout");
     } catch {
-      // backend pendiente, no pasa nada
     } finally {
       localStorage.removeItem("token");
       setMe(null);
@@ -53,8 +51,30 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const isAdmin = !!me?.admin;
+
+  const departamentoId =
+    me?.departamento_id ||
+    me?.departamento?.id ||
+    null;
+
+  const departamentoNombre =
+    me?.departamento?.nombre ||
+    me?.departamento?.numero ||
+    null;
+
   return (
-    <AuthContext.Provider value={{ me, login, logout, loading }}>
+    <AuthContext.Provider
+      value={{
+        me,
+        login,
+        logout,
+        loadingMe,
+        isAdmin,
+        departamentoId,
+        departamentoNombre,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

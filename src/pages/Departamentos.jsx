@@ -5,6 +5,9 @@ import Input from "../components/ui/Input.jsx";
 import Badge from "../components/ui/Badge.jsx";
 import Modal from "../components/ui/Modal.jsx";
 import Table from "../components/ui/Table.jsx";
+import ActionAlert from "../components/ui/ActionAlert.jsx";
+import LoadingButton from "../components/ui/LoadingButton.jsx";
+import useAsyncAction from "../hooks/useAsyncAction.js";
 
 import {
   getDepartamentos,
@@ -17,10 +20,9 @@ export default function Departamentos() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
 
-  // UI
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState("create"); // create | edit
+  const [mode, setMode] = useState("create");
   const [current, setCurrent] = useState(null);
 
   const [form, setForm] = useState({
@@ -28,6 +30,13 @@ export default function Departamentos() {
     codigo: "",
     moroso: false,
   });
+
+  const {
+    loading: actionLoading,
+    alert,
+    runAction,
+    closeAlert,
+  } = useAsyncAction();
 
   async function load() {
     setLoading(true);
@@ -44,9 +53,6 @@ export default function Departamentos() {
   }
 
   useEffect(() => {
-    // IMPORTANTE: si antes guardaste basura con torre/numero en localStorage
-    // borra esto una vez:
-    // localStorage.removeItem("departamentos");
     load();
   }, []);
 
@@ -90,18 +96,34 @@ export default function Departamentos() {
         moroso: !!form.moroso,
       };
 
-      if (mode === "create") {
-        await createDepartamento(payload);
-      } else {
-        await updateDepartamento(current?.id, payload);
-      }
+      await runAction({
+        action: async () => {
+          if (mode === "create") {
+            return await createDepartamento(payload);
+          }
+          return await updateDepartamento(current?.id, payload);
+        },
+        successTitle:
+          mode === "create"
+            ? "Departamento creado"
+            : "Departamento actualizado",
+        successMessage:
+          mode === "create"
+            ? "El departamento se registró correctamente."
+            : "Los cambios del departamento se guardaron correctamente.",
+        errorTitle: "No se pudo guardar",
+        getErrorMessage: (err) => {
+          const data = err?.response?.data;
+          if (data?.errors?.depa?.[0]) return data.errors.depa[0];
+          if (data?.errors?.codigo?.[0]) return data.errors.codigo[0];
+          return data?.message || "Revisa consola y laravel.log.";
+        },
+      });
 
       setOpen(false);
       await load();
     } catch (err) {
       console.error(err);
-      // Si es 422, aquí verías validaciones normalmente
-      alert("No se pudo guardar. Revisa consola y laravel.log.");
     }
   }
 
@@ -110,11 +132,18 @@ export default function Departamentos() {
     if (!ok) return;
 
     try {
-      await deleteDepartamento(row?.id);
+      await runAction({
+        action: () => deleteDepartamento(row?.id),
+        successTitle: "Departamento eliminado",
+        successMessage: "El departamento se eliminó correctamente.",
+        errorTitle: "No se pudo eliminar",
+        getErrorMessage: (err) =>
+          err?.response?.data?.message || "Revisa consola y laravel.log.",
+      });
+
       await load();
     } catch (err) {
       console.error(err);
-      alert("No se pudo eliminar. Revisa consola y laravel.log.");
     }
   }
 
@@ -124,8 +153,10 @@ export default function Departamentos() {
       header: "Departamento",
       render: (r) => (
         <div className="space-y-1">
-          <div className="font-semibold text-white">{r?.depa ?? "—"}</div>
-          <div className="text-xs text-slate-400">Código: {r?.codigo ?? "—"}</div>
+          <div className="font-semibold text-slate-900">{r?.depa ?? "—"}</div>
+          <div className="text-xs text-slate-500">
+            Código: {r?.codigo ?? "—"}
+          </div>
         </div>
       ),
     },
@@ -164,7 +195,7 @@ export default function Departamentos() {
         right={<Button onClick={openCreate}>+ Nuevo</Button>}
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="sm:max-w-sm w-full">
+          <div className="w-full sm:max-w-sm">
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -172,7 +203,7 @@ export default function Departamentos() {
             />
           </div>
 
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-slate-500">
             {loading ? "Cargando..." : `${filtered.length} departamento(s)`}
           </div>
         </div>
@@ -209,25 +240,45 @@ export default function Departamentos() {
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-200">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
             <input
               type="checkbox"
               checked={form.moroso}
-              onChange={(e) => setForm((f) => ({ ...f, moroso: e.target.checked }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, moroso: e.target.checked }))
+              }
             />
             Moroso
           </label>
 
           <div className="flex justify-end gap-2">
-            <Button type="button" tone="ghost" onClick={() => setOpen(false)}>
+            <Button
+              type="button"
+              tone="ghost"
+              onClick={() => setOpen(false)}
+              disabled={actionLoading}
+            >
               Cancelar
             </Button>
-            <Button type="submit" disabled={loading}>
+
+            <LoadingButton
+              type="submit"
+              loading={actionLoading}
+              className="bg-slate-900 text-white hover:bg-slate-800"
+            >
               Guardar
-            </Button>
+            </LoadingButton>
           </div>
         </form>
       </Modal>
+
+      <ActionAlert
+        open={alert.open}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+        onClose={closeAlert}
+      />
     </div>
   );
 }

@@ -18,8 +18,7 @@ function Item({ to, icon, label }) {
 }
 
 export default function Sidebar() {
-  const { me } = useAuth();
-  const admin = !!me?.admin;
+  const { me, isAdmin } = useAuth();
 
   const name =
     me?.persona
@@ -33,7 +32,7 @@ export default function Sidebar() {
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{name}</div>
           <div className="text-xs text-slate-500">
-            {admin ? "Administrador" : "Residente"}
+            {isAdmin ? "Administrador" : "Residente"}
           </div>
         </div>
       </div>
@@ -53,7 +52,7 @@ export default function Sidebar() {
         <Item to="/app" icon="🏠" label="Dashboard" />
         <Item to="/app/mensajes" icon="💬" label="Mensajes" />
 
-        {admin && (
+        {isAdmin && (
           <>
             <div className="mt-2 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Administración
@@ -63,6 +62,17 @@ export default function Sidebar() {
             <Item to="/app/departamentos" icon="🏢" label="Departamentos" />
             <Item to="/app/pagos" icon="💳" label="Pagos" />
             <Item to="/app/eventos" icon="🗳️" label="Eventos" />
+            <Item to="/app/encuesta-admin" icon="📊" label="Encuesta en vivo" />
+          </>
+        )}
+
+        {!isAdmin && (
+          <>
+            <div className="mt-2 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Mi espacio
+            </div>
+
+            <Item to="/app/mis-encuestas" icon="🗳️" label="Mis encuestas" />
           </>
         )}
       </div>
