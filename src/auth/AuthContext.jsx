@@ -51,7 +51,9 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const isAdmin = !!me?.admin;
+  const token = localStorage.getItem("token");
+  const isAuthenticated = !!token && !!me;
+  const isAdmin = !!me?.admin || me?.rol === "admin";
 
   const departamentoId =
     me?.departamento_id ||
@@ -67,9 +69,11 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider
       value={{
         me,
+        token,
         login,
         logout,
         loadingMe,
+        isAuthenticated,
         isAdmin,
         departamentoId,
         departamentoNombre,
