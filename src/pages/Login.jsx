@@ -23,12 +23,21 @@ export default function Login() {
         errorTitle: "No se pudo iniciar sesión",
         getErrorMessage: (err) => {
           const status = err?.response?.status;
-          const msg = err?.response?.data?.message;
+          const data = err?.response?.data;
+          const msg = data?.message;
+          const emailError = data?.errors?.email?.[0];
 
-          console.log("LOGIN ERROR:", err?.response?.data || err);
+          console.log("LOGIN ERROR:", data || err);
+
+          if (
+            emailError?.toLowerCase().includes("confirmar tu correo") ||
+            msg?.toLowerCase().includes("confirmar tu correo")
+          ) {
+            return "Debes confirmar tu correo electrónico antes de iniciar sesión.";
+          }
 
           if (status === 401 || status === 422) {
-            return "Credenciales incorrectas.";
+            return emailError || "Credenciales incorrectas.";
           }
 
           return msg ? `Error: ${msg}` : "No se pudo iniciar sesión.";
@@ -72,7 +81,14 @@ export default function Login() {
             />
           </div>
 
-          <div className="text-right">
+          <div className="flex items-center justify-between gap-3">
+            <Link
+              to="/register"
+              className="text-sm text-slate-400 underline hover:text-white"
+            >
+              Crear cuenta
+            </Link>
+
             <Link
               to="/forgot-password"
               className="text-sm text-slate-400 underline hover:text-white"
